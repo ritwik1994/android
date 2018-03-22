@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">OCR Sample</string>
+
+    <string-array name="image_options">
+        <item>Capture Image</item>
+        <item>Select FRom Gallery</item>
+    </string-array>
+</resources>
