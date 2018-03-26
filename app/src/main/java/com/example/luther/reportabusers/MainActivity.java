@@ -2,18 +2,25 @@ package com.example.luther.reportabusers;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.Image;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.support.annotation.IntegerRes;
 import android.support.annotation.NonNull;
+import android.support.design.widget.TextInputLayout;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
@@ -23,6 +30,8 @@ import android.util.Log;
 import android.util.SparseArray;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -33,13 +42,23 @@ import com.google.android.gms.vision.text.TextBlock;
 import com.google.android.gms.vision.text.TextRecognizer;
 
 import org.apache.commons.io.IOUtils;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 public class MainActivity extends AppCompatActivity {
     private static final String LOG_TAG = "Text API";
@@ -47,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
     AlertDialog imageAlert;
     private static int REQUEST_CAMERA = 0;
     private static int RESULT_LOAD_IMG = 1;
+    private static int PICKFILE_REQUEST_CODE = 2;
     private TextView scanResults;
     private Uri imageUri;
     ByteArrayOutputStream alternateBao=null;
@@ -57,6 +77,8 @@ public class MainActivity extends AppCompatActivity {
     String imageDataToStoreLoacal="";
     ByteArrayOutputStream baos;
     Uri pickedImage=null;
+    public TextInputLayout nameView,currentOrganisationView,positionView,educationalBackView,emailidView,phoneNoView,pastExpVIew;
+    public EditText nameText,currentOrganisationText,positionText,educationalText,emailIdText,phoneNoText,pastExpText;
     public int maximumHeight,maximumWidth;
     String imagePath=null;
 
@@ -65,7 +87,25 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         Button button = (Button) findViewById(R.id.button);
+        Button submitButton = (Button) findViewById(R.id.submit);
         scanResults = (TextView) findViewById(R.id.results);
+        nameView = (TextInputLayout) findViewById(R.id.nameText);
+        currentOrganisationView = (TextInputLayout) findViewById(R.id.currentOrganizationText);
+        positionView = (TextInputLayout) findViewById(R.id.positionText);
+        educationalBackView = (TextInputLayout) findViewById(R.id.educationBackgroundText);
+        emailidView = (TextInputLayout) findViewById(R.id.emailText);
+        phoneNoView = (TextInputLayout) findViewById(R.id.phoneNoText);
+        pastExpVIew = (TextInputLayout) findViewById(R.id.pastExperienceText);
+        nameText = (EditText)findViewById(R.id.name);
+        currentOrganisationText = (EditText)findViewById(R.id.currentOrganisation);
+        positionText = (EditText)findViewById(R.id.position);
+        educationalText = (EditText)findViewById(R.id.educationBackground);
+        emailIdText = (EditText)findViewById(R.id.emailId);
+        phoneNoText = (EditText)findViewById(R.id.phoneNo);
+        pastExpText = (EditText)findViewById(R.id.pastExperience);
+
+
+
         if (savedInstanceState != null) {
             imageUri = Uri.parse(savedInstanceState.getString(SAVED_INSTANCE_URI));
             scanResults.setText(savedInstanceState.getString(SAVED_INSTANCE_RESULT));
@@ -77,7 +117,9 @@ public class MainActivity extends AppCompatActivity {
                 if (extras.containsKey("dataURI")) {
                     String imageData = extras.getString("dataURI");
                     imageDataToStoreLoacal = imageData;
-                    pickedImage = Uri.parse(imageData);
+                    imageUri = Uri.parse(imageData);
+                    launchMediaScanIntent();
+                    textAnalysis();
                 }
             }catch(Exception e)
             {
@@ -108,6 +150,14 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View view) {
                 ActivityCompat.requestPermissions(MainActivity.this, new
                         String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_WRITE_PERMISSION);
+            }
+        });
+        submitButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                System.out.println(nameText);
+                CreateNewResume createNewResume = new CreateNewResume();
+                createNewResume.execute();
             }
         });
     }
@@ -202,7 +252,8 @@ public class MainActivity extends AppCompatActivity {
 //        if (requestCode == PHOTO_REQUEST && resultCode == RESULT_OK) {
 //            launchMediaScanIntent();
 //            try {
-//                Bitmap bitmap = decodeBitmapUri(this, imageUri);
+////                Bitmap bitmap = decodeBitmapUri(this, imageUri);
+//                Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(),imageUri);
 //                System.out.println(bitmap);
 //                System.out.println(detector.isOperational());
 //                if (detector.isOperational() && bitmap != null) {
@@ -249,11 +300,9 @@ public class MainActivity extends AppCompatActivity {
 //    }
 
     private void textAnalysis(){
-        launchMediaScanIntent();
         try {
-            Bitmap bitmap = decodeBitmapUri(this, imageUri);
-            System.out.println(bitmap);
-            System.out.println(detector.isOperational());
+//            Bitmap bitmap = decodeBitmapUri(this, pickedImage);
+            Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(),imageUri);
             if (detector.isOperational() && bitmap != null) {
                 Frame frame = new Frame.Builder().setBitmap(bitmap).build();
                 SparseArray<TextBlock> textBlocks = detector.detect(frame);
@@ -276,15 +325,7 @@ public class MainActivity extends AppCompatActivity {
                 if (textBlocks.size() == 0) {
                     scanResults.setText("Scan Failed: Found nothing to scan");
                 } else {
-                    scanResults.setText(scanResults.getText() + "Blocks: " + "\n");
-                    scanResults.setText(scanResults.getText() + blocks + "\n");
-                    scanResults.setText(scanResults.getText() + "---------" + "\n");
-                    scanResults.setText(scanResults.getText() + "Lines: " + "\n");
                     scanResults.setText(scanResults.getText() + lines + "\n");
-                    scanResults.setText(scanResults.getText() + "---------" + "\n");
-                    scanResults.setText(scanResults.getText() + "Words: " + "\n");
-                    scanResults.setText(scanResults.getText() + words + "\n");
-                    scanResults.setText(scanResults.getText() + "---------" + "\n");
                 }
             } else {
                 scanResults.setText("Could not set up the detector!");
@@ -310,6 +351,10 @@ public class MainActivity extends AppCompatActivity {
                                 startActivityForResult(imageIntent, REQUEST_CAMERA);
                                 break;
                             case 1:
+//                                startActivity(new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS));
+//                                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+//                                intent.setType("*/*");
+//                                startActivityForResult(intent, PICKFILE_REQUEST_CODE);
                                 imageIntent = new Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
                                 startActivityForResult(imageIntent, RESULT_LOAD_IMG);
                                 break;
@@ -330,7 +375,10 @@ public class MainActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == RESULT_LOAD_IMG && resultCode== Activity.RESULT_OK && data != null) {
-            textAnalysis();
+            Intent intent=new Intent(getBaseContext(),MainActivity.class);
+
+            intent.putExtra("dataURI",data.getData().toString());
+            startActivity(intent);
         }
 
         if (requestCode == REQUEST_CAMERA && resultCode==Activity.RESULT_OK && data != null) {
@@ -365,7 +413,10 @@ public class MainActivity extends AppCompatActivity {
                                 capturedImageFile.getAbsolutePath(), capturedImageFile.getName(), capturedImageFile.getName());
                         File file = new File(capturedImageFile.getAbsolutePath());
                         file.delete();
+                        Intent intent=new Intent(getBaseContext(),MainActivity.class);
+                        intent.putExtra("dataURI", mediaStoreUri);
                         thumbnail.recycle();
+                        startActivity(intent);
                         finish();
                     }
                     else
@@ -418,5 +469,88 @@ public class MainActivity extends AppCompatActivity {
 
         return BitmapFactory.decodeStream(ctx.getContentResolver()
                 .openInputStream(uri), null, bmOptions);
+    }
+
+
+    public class CreateNewResume extends AsyncTask<String, Void, Void> {
+        BufferedReader reader;
+        HttpURLConnection urlConnection;
+        Boolean postexec = false;
+        String valueError="";
+        Boolean uniquePhone = true;
+        Boolean uniqueEmail = true;
+        Boolean errorValue = false;
+        public String name,organisation,position,education,emailId,phoneNo,pastExp;
+
+        @Override
+        protected void onPreExecute() {
+            name = nameText.getText().toString();
+            organisation = currentOrganisationText.getText().toString();
+            position = positionText.getText().toString();
+            education = educationalText.getText().toString();
+            emailId = emailIdText.getText().toString();
+            phoneNo = phoneNoText.getText().toString();
+            pastExp = pastExpText.getText().toString();
+
+        }
+
+        @Override
+        protected Void doInBackground(String... params) {
+            try {
+
+                URL url = new URL("http://127.0.0.1:8000/candidates/");
+                urlConnection = (HttpURLConnection) url.openConnection();
+                urlConnection.setRequestMethod("POST");
+                urlConnection.setRequestProperty("Content-Type", "application/json");
+//                urlConnection.setRequestProperty("Accept", "application/json");
+                urlConnection.setDoInput(true);
+                urlConnection.setDoOutput(true);
+                urlConnection.connect();
+                OutputStreamWriter wr = new OutputStreamWriter(urlConnection.getOutputStream());
+                JSONObject data = new JSONObject();
+                data.put("name", name);
+                data.put("current_organization", organisation);
+                data.put("position", position);
+                data.put("educational_background", education);
+                data.put("email_id", emailId);
+                data.put("phone_no", Integer.parseInt(phoneNo));
+                data.put("past_experience", pastExp);
+                wr.write(data.toString());
+                wr.flush();
+                wr.close();
+
+                StringBuilder sb = new StringBuilder();
+                int responseCode = urlConnection.getResponseCode();
+                InputStream _is;
+                if (urlConnection.getResponseCode() < HttpURLConnection.HTTP_BAD_REQUEST) {
+                    reader = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
+                } else {
+                    reader = new BufferedReader(new InputStreamReader(urlConnection.getErrorStream()));
+                }
+                if(responseCode == 200 || responseCode == 201 || responseCode == 500) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    reader.close();
+                    valueError = sb.toString();
+
+                    return null;
+                }
+            } catch (Exception e) {
+                Log.v("Error er", e.toString());
+            }
+
+            return null;
+        }
+
+
+        @Override
+        protected void onPostExecute(Void result) {
+
+
+
+        }
+
     }
 }
